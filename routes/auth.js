@@ -5,6 +5,7 @@ const ForgetPassword = require("./ForgetPassword");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const emailjs = require("@emailjs/nodejs");
+const { v4: uuidv4 } = require("uuid")
 
 require("dotenv").config();
 
@@ -17,7 +18,6 @@ router.post("/signup", async (req, res) => {
     }
     const hashedPassword = await bcrypt.hash(Password, 10);
     const user = new User({ Username, Email, Password: hashedPassword });
-    console.log(user);
     await user.save();
     res.status(201).json({ message: "User registered successfully" });
   } catch (error) {
@@ -38,6 +38,16 @@ router.post("/signin", async (req, res) => {
       return res.status(401).json({ error: "wrong password" });
     }
 
+
+    const deviceUUID = uuidv4()
+    user.Devices.push(deviceUUID)
+
+       await user.save();
+
+    const updatedUser = await User.findOne({ Email });
+    
+    console.log(updatedUser)
+
     const token = jwt.sign(
       { id: user._id, email: user.Email },
       process.env.SECRET,
@@ -45,11 +55,29 @@ router.post("/signin", async (req, res) => {
         expiresIn: "1h",
       }
     );
-    res.status(200).json({ token });
+
+    res.status(200).json({ token, updatedUser });
   } catch (error) {
     res.status(500).json({ error: "Login failed" });
   }
 });
+
+// User signOut
+router.post("/signout", async (req, res) => {
+  try{
+    const { Email, deviceUUID } = req.body
+
+const user = await User.findOneAndUpdate(
+  { "Email": Email },
+  { $pull: { "Devices": deviceUUID } },
+  { new: true }
+);
+
+    res.status(200).json({ message: "successfull logout" })
+  } catch (err) {
+    res.status(500).json({ error: "logout failed" })
+  }
+})
 
 // forget password email
 router.post("/forgetpassword/email", async (req, res) => {
@@ -69,24 +97,24 @@ router.post("/forgetpassword/email", async (req, res) => {
       { new: true }
     );
 
-    emailjs.send(
-      "service_tw474m5",
-      "template_a6sps07",
-      { Username: updatedUser.Username, Code: updatedUser.Code, Email: updatedUser.Email },
-      {
-        publicKey: "oqImZpAIUPtDbRdJS",
-        privateKey: "IG7ti-qjHbRy2NXOewbDK",
-      }
-    )  .then(
-    (response) => {
-    }
-  )
-  .catch(
-    (error) => {
-          console.log(error.text)
-    }
-  )
-    ;
+    emailjs
+      .send(
+        "service_tw474m5",
+        "template_a6sps07",
+        {
+          Username: updatedUser.Username,
+          Code: updatedUser.Code,
+          Email: updatedUser.Email,
+        },
+        {
+          publicKey: "oqImZpAIUPtDbRdJS",
+          privateKey: "IG7ti-qjHbRy2NXOewbDK",
+        }
+      )
+      .then((response) => {})
+      .catch((error) => {
+        console.log(error.text);
+      });
 
     const token = jwt.sign(
       { id: updatedUser._id, email: updatedUser.Email },
