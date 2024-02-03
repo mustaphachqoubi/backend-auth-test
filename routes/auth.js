@@ -5,7 +5,7 @@ const ForgetPassword = require("./ForgetPassword");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const emailjs = require("@emailjs/nodejs");
-const { v4: uuidv4 } = require("uuid")
+const { v4: uuidv4 } = require("uuid");
 
 require("dotenv").config();
 
@@ -26,27 +26,21 @@ router.post("/signup", async (req, res) => {
 });
 
 // User login
+
 router.post("/signin", async (req, res) => {
   try {
-    const { Email, Password } = req.body;
+    const { Email, Password, deviceUUID } = req.body;
     const user = await User.findOne({ Email });
+
     if (!user) {
       return res.status(401).json({ error: "There is no such email" });
     }
+
     const passwordMatch = await bcrypt.compare(Password, user.Password);
+
     if (!passwordMatch) {
-      return res.status(401).json({ error: "wrong password" });
+      return res.status(401).json({ error: "Wrong password" });
     }
-
-
-    const deviceUUID = uuidv4()
-    user.Devices.push(deviceUUID)
-
-       await user.save();
-
-    const updatedUser = await User.findOne({ Email });
-    
-    console.log(updatedUser)
 
     const token = jwt.sign(
       { id: user._id, email: user.Email },
@@ -56,28 +50,58 @@ router.post("/signin", async (req, res) => {
       }
     );
 
-    res.status(200).json({ token, updatedUser });
+    if (user.Sessions.length < 1) {
+      const newDeviceUUID = uuidv4();
+      user.Sessions.push({ token: token, deviceUUID: newDeviceUUID });
+      await user.save();
+      console.log("Generated uuid");
+    } else {
+      console.log("Sessions not empty");
+      const existingSession = user.Sessions.find(
+        (session) => session.deviceUUID === deviceUUID
+      );
+
+      if (existingSession) {
+        console.log("You are in the same device");
+      } else {
+        console.log("You logged in a new device");
+        const newDeviceUUID = uuidv4();
+        user.Sessions.push({ token: token, deviceUUID: newDeviceUUID });
+        await user.save();
+      }
+    }
+
+    res.status(200).json({ token, user });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Login failed" });
   }
 });
 
+
 // User signOut
 router.post("/signout", async (req, res) => {
-  try{
-    const { Email, deviceUUID } = req.body
+  try {
+    const { Email, deviceUUID } = req.body;
 
-const user = await User.findOneAndUpdate(
-  { "Email": Email },
-  { $pull: { "Devices": deviceUUID } },
-  { new: true }
-);
+    const user = await User.findOne({ Email });
 
-    res.status(200).json({ message: "successfull logout" })
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    user.Sessions = user.Sessions.filter(
+      (session) => session.deviceUUID !== deviceUUID
+    );
+
+    await user.save();
+
+    res.status(200).json({ message: "successfull logout", user });
   } catch (err) {
-    res.status(500).json({ error: "logout failed" })
+    console.log(err);
+    res.status(500).json({ error: "logout failed" });
   }
-})
+});
 
 // forget password email
 router.post("/forgetpassword/email", async (req, res) => {
